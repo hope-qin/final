@@ -20,23 +20,23 @@
 LiquidCrystal lcd(39, 36, 35, 34, 33, 30)
 
 // define motor
-#define LEFT_MOTOR_DIR_PIN 7;
-#define RIGHT_MOTOR_DIR_PIN 8;  
-#define LEFT_MOTOR_PWM_PIN 9;
-#define RIGHT_MOTOR_PWM_PIN 10;
+#define LEFT_MOTOR_DIR_PIN 7
+#define RIGHT_MOTOR_DIR_PIN 8    
+#define LEFT_MOTOR_PWM_PIN 9
+#define RIGHT_MOTOR_PWM_PIN 10
 
 // define encoder
-#define LEFT_ENCODER_PIN 2;  
-#define RIGHT_ENCODER_PIN 3;
+#define LEFT_ENCODER_PIN 2
+#define RIGHT_ENCODER_PIN 3
 
 // define joystick
-#define JOYSTICK_X_PIN A2;
-#define JOYSTICK_Y_PIN A3;
-#define JOYSTICK_SW_PIN 4;
+#define JOYSTICK_X_PIN A2
+#define JOYSTICK_Y_PIN A3
+#define JOYSTICK_SW_PIN 4
 
 // define compass
-#define CMPS14_ADDRESS 0x60;
-#define BEARING_Register 0x01;
+#define CMPS14_ADDRESS 0x60
+#define BEARING_Register 0x01
 
 /***********************  系统常量区 *************************/
 // motion control
@@ -49,36 +49,66 @@ const float PULSES_PER_CM = 13.31;
 #define MODE_JOYSTICK 0;
 #define MODE_ESP 1;
 
+// PWM
+const int PWM_STOP = 0;
+const int PWM_SLOW = 120;
+const int PWM_MEDIUM = 180;
+const int PWM_FAST = 255;
+
+// direction control
+#define FORWARD 1;
+#define BACKWARD 0;
+
 // define compass direction
 #define NORTH 0;
 #define EAST 90;
 #define SOUTH 180;
 #define WEST 270;    
 
-// direction control
-#define FORWARD 1;
-#define BACKWARD 0;
-
 //*const unsigned long HEARTBEAT_TIMEOUT = 5000; //heartbeat timeout
 
-/************************* 变量区 *************************/
-// 系统状态
-int controlMode = 0;  // 0:摇杆, 1:ESP
-bool isError = false;
+/************************* 全局变量区 *************************/
+// system status
+int currentMode = MODE_JOYSTICK;
+bool isError = false;  
+String errorMessage = ""; 
 
-// 传感器数据
+// compass setting
 int currentHeading = 0;
 int compassOffset = 0;
 
-// 编码器计数
+// encoder count
 volatile int leftEncoderPulses = 0;
 volatile int rightEncoderPulses = 0;
+float leftDistance = 0;
+float rightDistance = 0;
+
+// motor control
+int leftMotorSpeed = 0;
+int rightMotorSpeed = 0;
+
+// ESP connection
+String lastCommand = "";
+
+// joystick control
+int joystickX = 0;
+int joystickY = 0;
+bool joystickButtonPressed = false; 
+
 
 /************************* 函数声明区 *********************/
 // 初始化函数
 void setupSystem();
 void setupCompass();
 void setupMotors();
+void setupJoystick();
+void setupEncoder();
+void setupMotors();
+void calibrateCompass();
+
+// 错误处理
+void handleLeftEncoder();
+void handleRightEncoder();
 
 // 传感器函数
 int readCompass();
@@ -98,6 +128,7 @@ void showError(String msg);
 void setup() {
     // 初始化串口
     Serial.begin(9600);
+    
 
     // 初始化LCD
     lcd.begin(20, 4);
