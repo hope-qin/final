@@ -4,8 +4,8 @@
 #include <FS.h>                 // 提供文件系统功能 / Provides file system functionality (SPIFFS)
 
 /******************** 全局变量 Global Variables ********************/
-const char* ssid = "Koti-Pizza-Official";         // WiFi网络名称 / WiFi network name
-const char* password = "Fangxiashouji";   // WiFi密码 / WiFi password
+const char* ssid = "SOURCE";         // WiFi网络名称 / WiFi network name
+const char* password = "Pelle!23";   // WiFi密码 / WiFi password
 
 // 创建Web服务器实例，监听80端口（HTTP默认端口）
 // Create web server instance on port 80 (default HTTP port)

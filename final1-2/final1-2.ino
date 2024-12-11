@@ -17,7 +17,7 @@
 #include <EEPROM.h>
 
 /************************* 引脚区 *************************/
-LiquidCrystal lcd(39, 36, 35, 34, 33, 30);
+LiquidCrystal lcd(38, 36, 35, 34, 33, 30);
 
 // define motor
 #define LEFT_MOTOR_DIR_PIN 7
@@ -68,6 +68,27 @@ const int PWM_FAST = 255;
 //*const unsigned long HEARTBEAT_TIMEOUT = 5000; //heartbeat timeout
 
 /************************* 全局变量区 *************************/
+
+// define errors
+enum ErrorType {
+    ERROR_NONE = 0,
+    ERROR_COMPASS = 1,
+    ERROR_MOTOR = 2,
+    ERROR_JOYSTICK = 3,
+    ERROR_COMMUNICATION = 4
+};
+
+// 错误信息结构
+struct ErrorInfo {
+    bool isError;
+    ErrorType type;
+    String message;
+    String statusMessage;  // 添加状态信息
+};
+
+// 全局错误信息对象
+ErrorInfo currentError = {false, ERROR_NONE, "", ""};
+
 // system status
 int currentMode = MODE_JOYSTICK;
 bool isError = false;  
@@ -98,6 +119,9 @@ Bounce modeButton = Bounce();
 
 // 在全局变量区添加
 int currentOrientation = 0;  // 记录小车当前朝向（以北为0度）
+const int JOYSTICK_DEADZONE = 25;  // 将死区值定义为常量
+const int MOTOR_UPDATE_INTERVAL = 50;  // 电机更新间隔
+
 
 /************************* 函数声明区 *********************/
 // 初始化函数
@@ -166,9 +190,8 @@ void setupMotors() {
 
 /************************* 循环程序 *********************/
 void loop() {
-    // 1. 读取传感器
-    currentHeading = readCompass();
-    //readEncoders();
+    // 1.更新方向信息
+    updateOrientation();
     
     // 2. 检查模式切换
     checkModeSwitch();
@@ -183,13 +206,12 @@ void loop() {
     // 4. 更新显示
     updateLCD();
     
-    // 5. 错误检查
-    if (isError) {
+    // 5.错误检查
+    if (currentError.isError) {
         handleError();
     }
     
-    // 6. 短暂延时
-    delay(5);
+    delay(50);
 }
 
 /************************* 功能函数区 *********************/
@@ -198,7 +220,7 @@ void loop() {
 void setupSystem() {
     // ... other setup code ...
     
-    // 设置模式切换按钮（使用摇杆的按钮）
+    // 设置模式切换按钮（使用摇杆的按��）
     pinMode(JOYSTICK_SW_PIN, INPUT_PULLUP);
     modeButton.attach(JOYSTICK_SW_PIN);
     modeButton.interval(50); // 设置防抖时间为50ms
@@ -295,52 +317,65 @@ void checkModeSwitch() {
 
 // joystick mode
 void handleJoystickMode() {
-    // 读取摇杆值
-    joystickX = analogRead(JOYSTICK_X_PIN);
-    joystickY = analogRead(JOYSTICK_Y_PIN);
+    updateStatus("Joystick Control");
+    const int deadzone = 25;  // 设置死区值
     
-    // 将摇杆值映射为电机速度
-    int leftSpeed = 0;
-    int rightSpeed = 0;
+    // 读取摇杆值并中心化到0
+    int xValue = analogRead(JOYSTICK_X_PIN) - 512;
+    int yValue = analogRead(JOYSTICK_Y_PIN) - 512;
     
     // 打印摇杆原始值用于调试
     Serial.print("Joystick Raw - X: ");
-    Serial.print(joystickX);
+    Serial.print(xValue);
     Serial.print(" Y: ");
-    Serial.println(joystickY);
+    Serial.println(yValue);
     
-    // Y轴控制前进后退
-    int baseSpeed = map(joystickY, 0, 1023, -255, 255);
-    // X轴控制转向
-    int turnOffset = map(joystickX, 0, 1023, -128, 128);
+    // 死区处理
+    if(abs(xValue) < deadzone) xValue = 0;
+    if(abs(yValue) < deadzone) yValue = 0;
     
-    // 检查摇杆是否在中位
-    if (abs(joystickY - 512) < 100 && abs(joystickX - 512) < 100) {
-        // 摇杆在中位区域，停止电机
+    // 计算基础速度和转向速度
+    int baseSpeed = constrain(map(abs(yValue), deadzone, 512, 0, 255), 0, 255);
+    int turnSpeed = constrain(map(abs(xValue), deadzone, 512, 0, baseSpeed), 0, baseSpeed);
+    
+    // 设置初始电机速度
+    int leftSpeed = baseSpeed;
+    int rightSpeed = baseSpeed;
+    
+    // 如果摇杆在死区内，停止电机
+    if (yValue == 0 && xValue == 0) {
         stopMotors();
         return;  // 直接返回，不执行后续代码
     }
     
-    // 如果摇杆不在中位，计算电机速度
-    leftSpeed = baseSpeed + turnOffset;
-    rightSpeed = baseSpeed - turnOffset;
+    // 设置前进/后退方向
+    bool forward = yValue >= 0;
+    digitalWrite(LEFT_MOTOR_DIR_PIN, forward ? FORWARD : BACKWARD);
+    digitalWrite(RIGHT_MOTOR_DIR_PIN, forward ? FORWARD : BACKWARD);
     
-    // 限制速度范围
-    leftSpeed = constrain(leftSpeed, -255, 255);
-    rightSpeed = constrain(rightSpeed, -255, 255);
-    
-    // 添加死区控制
-    if (abs(baseSpeed) < 50) {  // 添加死区
-        leftSpeed = 0;
-        rightSpeed = 0;
+    // 转向控制
+    if (xValue < 0) {
+        leftSpeed -= turnSpeed;  // 左转
+    } else if (xValue > 0) {
+        rightSpeed -= turnSpeed; // 右转
     }
     
-    // 控制电机
-    moveMotors(leftSpeed, rightSpeed);
+    // 应用电机速度
+    analogWrite(LEFT_MOTOR_PWM_PIN, leftSpeed);
+    analogWrite(RIGHT_MOTOR_PWM_PIN, rightSpeed);
+    
+    // 打印调试信息
+    Serial.print("Motor Speed - Left: ");
+    Serial.print(leftSpeed);
+    Serial.print(" Right: ");
+    Serial.print(rightSpeed);
+    Serial.print(" Direction: ");
+    Serial.println(forward ? "Forward" : "Backward");
 }
 
 // ESP mode
 void handleESPMode() {
+    updateStatus("ESP Control");
     // 检查是否有新的串口命令
     if (Serial.available() > 0) {
         lastCommand = Serial.readStringUntil('\n');
@@ -358,7 +393,8 @@ void handleESPMode() {
             handleTurnCommand(value);
         }
         else if (lastCommand == "find:North") {
-            handleFindNorth();
+            // 直接调用handleTurnCommand(0)来寻找北方
+            handleTurnCommand("0");
         }
         
         // 更新LCD显示最新命令
@@ -440,35 +476,63 @@ void findHeading(int target) {
 void handleTurnCommand(String value) {
     int turnAngle = value.toInt();
     updateOrientation();  // 更新当前朝向
+    int startOrientation = currentOrientation;  // 记录开始时的方向
     
     Serial.print("Current Orientation: ");
     Serial.print(currentOrientation);
     Serial.print("° Turn Angle: ");
     Serial.println(turnAngle);
     
-    // 如果turnAngle为0，说明是要转到0度（北方）
+    // 寻北模式 - 使用最短路径
     if (turnAngle == 0) {
         turnAngle = -currentOrientation;  // 计算到0度需要转动的角度
+        if (turnAngle < -180) {
+            turnAngle += 360;  // 选择最短的转向路径
+        } else if (turnAngle > 180) {
+            turnAngle -= 360;
+        }
         Serial.print("Turning to North, recalculated angle: ");
         Serial.println(turnAngle);
     }
     
-    int remainingAngle = abs(turnAngle);  // 仅关注需要转动的角度大小
+    int targetAngle = abs(turnAngle);  // 目标需要转动的角度
+    int turnedAngle = 0;  // 已经转动的角度
+    int lastOrientation = currentOrientation;
+    int noChangeCount = 0;
+    int remainingAngle = targetAngle;  // 初始化剩余需要转动的角度
     
-    while (remainingAngle > HEADING_TOLERANCE) {
+    while (turnedAngle < targetAngle) {
         updateOrientation();
         
-        Serial.print("Current: ");
-        Serial.print(currentOrientation);
-        Serial.print("° Remaining: ");
-        Serial.println(remainingAngle);
+        // 检测是否在原地转圈
+        if (abs(currentOrientation - lastOrientation) < 2) {
+            noChangeCount++;
+            if (noChangeCount > 5) {
+                Serial.println("Stuck detected, stopping turn");
+                break;
+            }
+        } else {
+            noChangeCount = 0;
+        }
+        
+        // 计算已转动的角度
+        int currentTurnedAngle = abs(currentOrientation - startOrientation);
+        turnedAngle = min(currentTurnedAngle, targetAngle);  // 确保不会过度转动
+        remainingAngle = targetAngle - turnedAngle;  // 更新剩余角度
+        
+        Serial.print("Turned: ");
+        Serial.print(turnedAngle);
+        Serial.print("° Target: ");
+        Serial.println(targetAngle);
         
         // 根据剩余角度动态调整转向速度
         int turnSpeed;
-        if (remainingAngle < 15) {
-            turnSpeed = MIN_TURN_SPEED;
+        if (remainingAngle < 10) {
+            turnSpeed = MIN_TURN_SPEED - 30;  // 更低的速度用于精确调整
+        } else if (remainingAngle < 30) {
+            turnSpeed = MIN_TURN_SPEED - 20;
         } else {
-            turnSpeed = map(remainingAngle, 15, 180, MIN_TURN_SPEED, MAX_TURN_SPEED);
+            turnSpeed = MIN_TURN_SPEED;
         }
         
         // 根据turnAngle的正负决定转向方向
@@ -482,23 +546,12 @@ void handleTurnCommand(String value) {
             digitalWrite(RIGHT_MOTOR_DIR_PIN, FORWARD);
         }
         
+        // 应用转向速度
         analogWrite(LEFT_MOTOR_PWM_PIN, turnSpeed);
         analogWrite(RIGHT_MOTOR_PWM_PIN, turnSpeed);
         
-        // 根据剩余角度调整转向时间
-        int turnTime = map(remainingAngle, 0, 180, 30, 100);
-        delay(turnTime);
-        stopMotors();
-        delay(50);
-        
-        // 更新剩余需要转动的角度
-        remainingAngle -= 5;  // 假设每次转动5度
-
-         // 打印调试信息
-        Serial.print("Current: ");
-        Serial.print(currentOrientation);
-        Serial.print("° Remaining: ");
-        Serial.println(remainingAngle);
+        lastOrientation = currentOrientation;
+        delay(50);  // 短暂延时以读取方向变化
     }
     
     stopMotors();
@@ -513,29 +566,29 @@ void updateOrientation() {
 }
 
 // handling find north command
-void handleFindNorth() {
-    Serial.println("Starting North finding sequence...");
-    updateOrientation();  // 更新当前朝向
+// void handleFindNorth() {
+//     Serial.println("Starting North finding sequence...");
+//     updateOrientation();  // 更新当前朝向
     
-    // 直接使用当前方向的负值作为转动角度
-    int turnValue = -currentOrientation;
+//     // 直接使用当前方向的负值作为转动角度
+//     int turnValue = -currentOrientation;
+//     if (turnValue < -180) {
+//         turnValue += 360;  // 选择最短的转向路径
+//     } else if (turnValue > 180) {
+//         turnValue -= 360;
+//     }
     
-    // 打印调试信息
-    Serial.print("Current orientation: ");
-    Serial.print(currentOrientation);
-    Serial.print("° Calculated turn value: ");
-    Serial.println(turnValue);
+//     // 打印调试信息
+//     Serial.print("Current orientation: ");
+//     Serial.print(currentOrientation);
+//     Serial.print("° Calculated turn value: ");
+//     Serial.println(turnValue);
     
-    // 确保转换为字符串时保留负号
-    String turnCommand = String(turnValue);
-    Serial.print("Turn command string: ");
-    Serial.println(turnCommand);
+//     // 调用handleTurnCommand
+//     handleTurnCommand(String(turnValue));
     
-    // 调用handleTurnCommand
-    handleTurnCommand(turnCommand);
-    
-    Serial.println("North direction found!");
-}
+//     Serial.println("North direction found!");
+// }
 
 // 计算航向误差的辅助函数
 int calculateHeadingError(int current, int target) {
@@ -556,7 +609,7 @@ void moveMotors(int leftSpeed, int rightSpeed) {
     analogWrite(RIGHT_MOTOR_PWM_PIN, abs(rightSpeed));
 }
 
-// 添加错误处理函数
+// 添加错��处理函数
 void handleError() {
     if (isError) {
         // 显示错误信息
@@ -584,27 +637,122 @@ void updateLCD() {
     lcd.setCursor(0, 0);
     lcd.print("Mode:");
     lcd.print(currentMode == MODE_JOYSTICK ? "Joy" : "ESP");
-    lcd.print(" Dir:");
-    lcd.print(readCompass());
     
-    // 第二行：编码器计数
+    // 第二行：状态/错误信息
     lcd.setCursor(0, 1);
-    lcd.print("L:");
-    lcd.print(leftEncoderPulses);
-    lcd.print(" R:");
-    lcd.print(rightEncoderPulses);
+    if (currentError.isError) {
+        lcd.print("Error: ");
+        lcd.print(currentError.message);
+    } else {
+        // 显示正常运行状态
+        lcd.print("Status: ");
+        lcd.print(currentError.statusMessage);
+    }
     
-    // 第三行：根据模式显示不同信息
-    lcd.setCursor(0, 2);
+    // 第三行：方向信息（使用新的显示函数）
+    displayDirection(currentOrientation);
+    
+    // 第四行：根据模式显示不同信息
+    lcd.setCursor(0, 3);
     if (currentMode == MODE_JOYSTICK) {
-        lcd.print("X:");
-        lcd.print(joystickX);
-        lcd.print(" Y:");
-        lcd.print(joystickY);
+        lcd.print("JS:");
+        lcd.print(leftMotorSpeed);
+        lcd.print(",");
+        lcd.print(rightMotorSpeed);
     } else {
         lcd.print("CMD:");
         lcd.print(lastCommand);
     }
+}
+
+// 修改错误处理函数
+void handleError(ErrorType type, String message) {
+    currentError.isError = true;
+    currentError.type = type;
+    currentError.message = message;
+    
+    // 根据错误类型采取不同措施
+    switch(type) {
+        case ERROR_COMPASS:
+            stopMotors();
+            currentError.statusMessage = "Compass Error";
+            break;
+            
+        case ERROR_MOTOR:
+            stopMotors();
+            currentError.statusMessage = "Motor Error";
+            break;
+            
+        case ERROR_JOYSTICK:
+            stopMotors();
+            currentError.statusMessage = "Joystick Error";
+            break;
+            
+        case ERROR_COMMUNICATION:
+            currentError.statusMessage = "Comm Error";
+            break;
+    }
+    
+    // 立即更新LCD显示
+    updateLCD();
+}
+
+// 添加状态更新函数
+void updateStatus(String status) {
+    currentError.isError = false;
+    currentError.type = ERROR_NONE;
+    currentError.message = "";
+    currentError.statusMessage = status;
+    updateLCD();
+}
+
+// 错误检测示例
+void checkCompass() {
+    int heading = readCompass();
+    if (heading == -1) {
+        handleError(ERROR_COMPASS, "Sensor Fail");
+    }
+}
+
+void checkMotors() {
+    // 检查电机编码器反馈
+    if (leftMotorSpeed > 0 && leftEncoderPulses == 0) {
+        handleError(ERROR_MOTOR, "Left Motor");
+    }
+    if (rightMotorSpeed > 0 && rightEncoderPulses == 0) {
+        handleError(ERROR_MOTOR, "Right Motor");
+    }
+}
+
+// 添加方向显示函数
+void displayDirection(int heading) {
+    String direction;
+    
+    // 将角度转换为方向字符串
+    if ((heading >= 337.5 && heading <= 360) || (heading >= 0 && heading < 22.5)) {
+        direction = "N";
+    } else if (heading >= 22.5 && heading < 67.5) {
+        direction = "NE";
+    } else if (heading >= 67.5 && heading < 112.5) {
+        direction = "E";
+    } else if (heading >= 112.5 && heading < 157.5) {
+        direction = "SE";
+    } else if (heading >= 157.5 && heading < 202.5) {
+        direction = "S";
+    } else if (heading >= 202.5 && heading < 247.5) {
+        direction = "SW";
+    } else if (heading >= 247.5 && heading < 292.5) {
+        direction = "W";
+    } else if (heading >= 292.5 && heading < 337.5) {
+        direction = "NW";
+    }
+    
+    // 在LCD上显示方向信息
+    lcd.setCursor(0, 2);  // 使用第三行显示方向
+    lcd.print("Dir: ");
+    lcd.print(heading);
+    lcd.print("  ");
+    lcd.print(direction);
 }
 
 

@@ -35,7 +35,7 @@ const int RIGHT_ENCODER_PIN = 3;  // 右编码器引脚 / Right encoder pin
 // 电机控制和导航常量 / Constants for motor control and navigation
 const int MIN_TURN_SPEED = 120;                // 最小转向速度 / Minimum turning speed
 const int MAX_TURN_SPEED = 180;                // 最大转向速度 / Maximum turning speed
-const int HEADING_TOLERANCE = 2;               // 方向容差 / Heading tolerance
+const int HEADING_TOLERANCE = 1;               // 方向容差 / Heading tolerance
 const float PULSES_PER_CM = 13.31;             // 每厘米脉冲数 / Pulses per centimeter
 const unsigned long HEARTBEAT_TIMEOUT = 5000;  // 心跳超时时间(毫秒) / Heartbeat timeout (ms)
 
