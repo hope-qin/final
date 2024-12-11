@@ -172,6 +172,12 @@ void setup() {
     // 初始化完成提示
     Serial.println("System initialized");
     lcd.print("System Ready!");
+
+    // 设置编码器中断
+    pinMode(LEFT_ENCODER_PIN, INPUT_PULLUP);
+    pinMode(RIGHT_ENCODER_PIN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(LEFT_ENCODER_PIN), handleLeftEncoder, RISING);
+    attachInterrupt(digitalPinToInterrupt(RIGHT_ENCODER_PIN), handleRightEncoder, RISING);
 }
 
 void setupMotors() {
@@ -193,6 +199,7 @@ void loop() {
     // 1.更新方向信息
     updateOrientation();
     
+
     // 2. 检查模式切换
     checkModeSwitch();
     
@@ -215,12 +222,10 @@ void loop() {
 }
 
 /************************* 功能函数区 *********************/
-// 这里将实现各个具体的功能函数...
 
 void setupSystem() {
-    // ... other setup code ...
-    
-    // 设置模式切换按钮（使用摇杆的按��）
+
+    // 设置模式切换按钮（使用摇杆的按钮）
     pinMode(JOYSTICK_SW_PIN, INPUT_PULLUP);
     modeButton.attach(JOYSTICK_SW_PIN);
     modeButton.interval(50); // 设置防抖时间为50ms
@@ -325,10 +330,10 @@ void handleJoystickMode() {
     int yValue = analogRead(JOYSTICK_Y_PIN) - 512;
     
     // 打印摇杆原始值用于调试
-    Serial.print("Joystick Raw - X: ");
-    Serial.print(xValue);
-    Serial.print(" Y: ");
-    Serial.println(yValue);
+    // Serial.print("Joystick Raw - X: ");
+    // Serial.print(xValue);
+    // Serial.print(" Y: ");
+    // Serial.println(yValue);
     
     // 死区处理
     if(abs(xValue) < deadzone) xValue = 0;
@@ -415,127 +420,132 @@ void handleMoveCommand(int distance) {
     // 根据distance的绝对值来决定运行时间
     delay(abs(distance) * 100);  // 假设每厘米需要100ms
     moveMotors(0, 0);  // 停止
+
 }
 // finding heading
-void findHeading(int target) {
-    // 更新当前方向
-    int currentHeading = readCompass();
-    int turnSpeed = 150;  // 声明并初始化转向速度
+// void findHeading(int target) {
+//     // 更新当前方向
+//     int currentHeading = readCompass();
+//     int turnSpeed = 150;  // 声明并初始化转向速度
 
-    // 计算到目标角度的最短路径
-    int diff = target - currentHeading;  // 顺时针差值
-    int complement = diff > 0 ? diff - 360 : 360 + diff;  // 逆时针差值
-    int realDiff = abs(diff) < abs(complement) ? diff : complement;
+//     // 计算到目标角度的最短路径
+//     int diff = target - currentHeading;  // 顺时针差值
+//     int complement = diff > 0 ? diff - 360 : 360 + diff;  // 逆时针差值
+//     int realDiff = abs(diff) < abs(complement) ? diff : complement;
     
-    // 打印调试信息
-    Serial.print("Current: ");
-    Serial.print(currentHeading);
-    Serial.print(" Target: ");
-    Serial.print(target);
-    Serial.print(" Diff: ");
-    Serial.println(realDiff);
+//     // 打印调试信息
+//     Serial.print("Current: ");
+//     Serial.print(currentHeading);
+//     Serial.print(" Target: ");
+//     Serial.print(target);
+//     Serial.print(" Diff: ");
+//     Serial.println(realDiff);
 
-    // 当差值大于容差时继续转向
-    while ((abs(realDiff) * 1.0) > 2.5) {
-        if (realDiff > 0) {
-            // 右转
-            digitalWrite(LEFT_MOTOR_DIR_PIN, FORWARD);
-            digitalWrite(RIGHT_MOTOR_DIR_PIN, BACKWARD);
-        } else {
-            // 左转
-            digitalWrite(LEFT_MOTOR_DIR_PIN, BACKWARD);
-            digitalWrite(RIGHT_MOTOR_DIR_PIN, FORWARD);
-        }
+//     // 当差值大于容差时继续转向
+//     while ((abs(realDiff) * 1.0) > 2.5) {
+//         if (realDiff > 0) {
+//             // 右转
+//             digitalWrite(LEFT_MOTOR_DIR_PIN, FORWARD);
+//             digitalWrite(RIGHT_MOTOR_DIR_PIN, BACKWARD);
+//         } else {
+//             // 左转
+//             digitalWrite(LEFT_MOTOR_DIR_PIN, BACKWARD);
+//             digitalWrite(RIGHT_MOTOR_DIR_PIN, FORWARD);
+//         }
         
-        // 应用电机速度
-        analogWrite(LEFT_MOTOR_PWM_PIN, turnSpeed);
-        analogWrite(RIGHT_MOTOR_PWM_PIN, turnSpeed);
+//         // 应用电机速度
+//         analogWrite(LEFT_MOTOR_PWM_PIN, turnSpeed);
+//         analogWrite(RIGHT_MOTOR_PWM_PIN, turnSpeed);
         
-        delay(100);
-        stopMotors();
-        delay(50);
+//         delay(100);
+//         stopMotors();
+//         delay(50);
         
-        // 更新方向和差值
-        currentHeading = readCompass();
-        diff = target - currentHeading;
-        complement = diff > 0 ? diff - 360 : 360 + diff;
-        realDiff = abs(diff) < abs(complement) ? diff : complement;
+//         // 更新方向和差值
+//         currentHeading = readCompass();
+//         diff = target - currentHeading;
+//         complement = diff > 0 ? diff - 360 : 360 + diff;
+//         realDiff = abs(diff) < abs(complement) ? diff : complement;
         
-        // 打印当前状态
-        Serial.print("Current: ");
-        Serial.print(currentHeading);
-        Serial.print(" Diff: ");
-        Serial.println(realDiff);
-    }
+//         // 打印当前状态
+//         Serial.print("Current: ");
+//         Serial.print(currentHeading);
+//         Serial.print(" Diff: ");
+//         Serial.println(realDiff);
+//     }
     
-    stopMotors();
-    Serial.println("Target heading reached");
-}
+//     stopMotors();
+//     Serial.println("Target heading reached");
+// }
 
 // handling turn command
 void handleTurnCommand(String value) {
     int turnAngle = value.toInt();
-    updateOrientation();  // 更新当前朝向
-    int startOrientation = currentOrientation;  // 记录开始时的方向
+    updateOrientation();
+    int initialOrientation = currentOrientation;
+    int accumulatedAngle = 0;  // 累计转动角度
+    int lastOrientation = currentOrientation;
     
-    Serial.print("Current Orientation: ");
-    Serial.print(currentOrientation);
+    Serial.print("Initial Orientation: ");
+    Serial.print(initialOrientation);
     Serial.print("° Turn Angle: ");
     Serial.println(turnAngle);
-    
-    // 寻北模式 - 使用最短路径
+
+    // 如果是寻北命令
     if (turnAngle == 0) {
-        turnAngle = -currentOrientation;  // 计算到0度需要转动的角度
-        if (turnAngle < -180) {
-            turnAngle += 360;  // 选择最短的转向路径
-        } else if (turnAngle > 180) {
-            turnAngle -= 360;
-        }
-        Serial.print("Turning to North, recalculated angle: ");
-        Serial.println(turnAngle);
+        // 寻北模式使用最短路径
+        int diff = -currentOrientation;
+        if (diff < -180) diff += 360;
+        if (diff > 180) diff -= 360;
+        turnAngle = diff;
     }
-    
-    int targetAngle = abs(turnAngle);  // 目标需要转动的角度
-    int turnedAngle = 0;  // 已经转动的角度
-    int lastOrientation = currentOrientation;
-    int noChangeCount = 0;
-    int remainingAngle = targetAngle;  // 初始化剩余需要转动的角度
-    
-    while (turnedAngle < targetAngle) {
+
+    while (abs(accumulatedAngle) < abs(turnAngle)) {
         updateOrientation();
         
-        // 检测是否在原地转圈
-        if (abs(currentOrientation - lastOrientation) < 2) {
-            noChangeCount++;
-            if (noChangeCount > 5) {
-                Serial.println("Stuck detected, stopping turn");
-                break;
+        // 计算单次转动的角度变化
+        int angleChange = currentOrientation - lastOrientation;
+        
+        // 处理角度环绕情况
+        if (angleChange > 180) angleChange -= 360;
+        if (angleChange < -180) angleChange += 360;
+        
+        // 只有当角度变化超过阈值时才累加
+        if (abs(angleChange) > 1) {
+            if (turnAngle > 0) {
+                // 右转
+                if (angleChange > 0) {
+                    accumulatedAngle += angleChange;
+                } else {
+                    // 处理从359到0的情况
+                    accumulatedAngle += (angleChange + 360);
+                }
+            } else {
+                // 左转
+                if (angleChange < 0) {
+                    accumulatedAngle += angleChange;
+                } else {
+                    // 处理从0到359的情况
+                    accumulatedAngle -= (360 - angleChange);
+                }
             }
-        } else {
-            noChangeCount = 0;
+            lastOrientation = currentOrientation;
         }
+
+        // 计算剩余需要转动的角度
+        int remainingAngle = abs(turnAngle) - abs(accumulatedAngle);
         
-        // 计算已转动的角度
-        int currentTurnedAngle = abs(currentOrientation - startOrientation);
-        turnedAngle = min(currentTurnedAngle, targetAngle);  // 确保不会过度转动
-        remainingAngle = targetAngle - turnedAngle;  // 更新剩余角度
-        
-        Serial.print("Turned: ");
-        Serial.print(turnedAngle);
-        Serial.print("° Target: ");
-        Serial.println(targetAngle);
-        
-        // 根据剩余角度动态调整转向速度
+        // 根据剩余角度动态调整速度
         int turnSpeed;
         if (remainingAngle < 10) {
-            turnSpeed = MIN_TURN_SPEED - 30;  // 更低的速度用于精确调整
+            turnSpeed = MIN_TURN_SPEED - 30;
         } else if (remainingAngle < 30) {
             turnSpeed = MIN_TURN_SPEED - 20;
         } else {
             turnSpeed = MIN_TURN_SPEED;
         }
-        
-        // 根据turnAngle的正负决定转向方向
+
+        // 设置电机方向
         if (turnAngle > 0) {
             // 右转
             digitalWrite(LEFT_MOTOR_DIR_PIN, FORWARD);
@@ -545,13 +555,19 @@ void handleTurnCommand(String value) {
             digitalWrite(LEFT_MOTOR_DIR_PIN, BACKWARD);
             digitalWrite(RIGHT_MOTOR_DIR_PIN, FORWARD);
         }
-        
+
         // 应用转向速度
         analogWrite(LEFT_MOTOR_PWM_PIN, turnSpeed);
         analogWrite(RIGHT_MOTOR_PWM_PIN, turnSpeed);
-        
-        lastOrientation = currentOrientation;
-        delay(50);  // 短暂延时以读取方向变化
+
+        Serial.print("Current: ");
+        Serial.print(currentOrientation);
+        Serial.print("° Accumulated: ");
+        Serial.print(accumulatedAngle);
+        Serial.print("° Remaining: ");
+        Serial.println(abs(turnAngle) - abs(accumulatedAngle));
+
+        delay(50);
     }
     
     stopMotors();
@@ -561,8 +577,6 @@ void handleTurnCommand(String value) {
 // 更新方向的辅助函数
 void updateOrientation() {
     currentOrientation = readCompass();
-    Serial.print("Updated orientation: ");
-    Serial.println(currentOrientation);
 }
 
 // handling find north command
@@ -609,7 +623,7 @@ void moveMotors(int leftSpeed, int rightSpeed) {
     analogWrite(RIGHT_MOTOR_PWM_PIN, abs(rightSpeed));
 }
 
-// 添加错��处理函数
+// 添加错误处理函数
 void handleError() {
     if (isError) {
         // 显示错误信息
@@ -635,8 +649,9 @@ void updateLCD() {
     
     // 第一行：模式和方向
     lcd.setCursor(0, 0);
-    lcd.print("Mode:");
-    lcd.print(currentMode == MODE_JOYSTICK ? "Joy" : "ESP");
+    lcd.print("pulse:");
+    lcd.print(PULSES_PER_CM);
+
     
     // 第二行：状态/错误信息
     lcd.setCursor(0, 1);
@@ -649,19 +664,21 @@ void updateLCD() {
         lcd.print(currentError.statusMessage);
     }
     
-    // 第三行：方向信息（使用新的显示函数）
+    // 第三行：方向信息
     displayDirection(currentOrientation);
     
-    // 第四行：根据模式显示不同信息
+    // 第四行：根据模式显示不同信息以及脉冲计数
     lcd.setCursor(0, 3);
     if (currentMode == MODE_JOYSTICK) {
-        lcd.print("JS:");
-        lcd.print(leftMotorSpeed);
-        lcd.print(",");
-        lcd.print(rightMotorSpeed);
+        lcd.print("L:");
+        lcd.print(leftEncoderPulses);
+        lcd.print(" R:");
+        lcd.print(rightEncoderPulses);
     } else {
-        lcd.print("CMD:");
-        lcd.print(lastCommand);
+        lcd.print("L:");
+        lcd.print(leftEncoderPulses);
+        lcd.print(" R:");
+        lcd.print(rightEncoderPulses);
     }
 }
 
@@ -729,9 +746,9 @@ void displayDirection(int heading) {
     String direction;
     
     // 将角度转换为方向字符串
-    if ((heading >= 337.5 && heading <= 360) || (heading >= 0 && heading < 22.5)) {
+    if (heading >= 337.5 || heading < 22.5) {  // 处理跨越0度的北向区间
         direction = "N";
-    } else if (heading >= 22.5 && heading < 67.5) {
+    } else if (heading >= 22.5 && heading < 67.5) {  // 使用标准45度区间
         direction = "NE";
     } else if (heading >= 67.5 && heading < 112.5) {
         direction = "E";
@@ -753,6 +770,21 @@ void displayDirection(int heading) {
     lcd.print(heading);
     lcd.print("  ");
     lcd.print(direction);
+}
+
+// 添加中断处理函数
+void handleLeftEncoder() {
+    leftEncoderPulses++;
+}
+
+void handleRightEncoder() {
+    rightEncoderPulses++;
+}
+
+// 添加重置编码器计数的函数
+void resetEncoders() {
+    leftEncoderPulses = 0;
+    rightEncoderPulses = 0;
 }
 
 
