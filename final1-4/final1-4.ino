@@ -182,7 +182,6 @@ void setupMotors() {
 void loop() {
     // 1.update orientation
     updateOrientation();
-    handleTurnCommand(0);
 
     // 2. check mode switch
     checkModeSwitch();
