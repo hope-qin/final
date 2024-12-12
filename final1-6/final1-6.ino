@@ -249,14 +249,8 @@ int readCompass() {
     // 向CMPS14发送寄存器地址
     Wire.beginTransmission(CMPS14_ADDRESS);
     Wire.write(BEARING_Register);
-    int error = Wire.endTransmission();
-    
-    if (error != 0) {
-        Serial.print("I2C Error: ");
-        Serial.println(error);
-        return -1;
-    }
-    
+    Wire.endTransmission();
+
     // request 1 byte
     Wire.requestFrom(CMPS14_ADDRESS, 1);
     
@@ -265,8 +259,11 @@ int readCompass() {
         // convert to angle (0-359)
         int heading = map(raw, 0, 255, 0, 359);
         
-        // apply offset calibration
+        //校准偏移
         heading = (heading - compassOffset + 360) % 360;
+        
+        // 更新当前方向，但不用它来计算角度
+        currentOrientation = heading;
         
         return heading;
     }
@@ -287,7 +284,8 @@ int readRawCompass() {
     
     if (Wire.available() >= 1) {
         int raw = Wire.read();
-        return map(raw, 0, 255, 0, 359);
+        int heading = map(raw, 0, 255, 0, 359);
+        return heading;  // return raw value
     }
 
     currentError.isError = true;
