@@ -69,7 +69,7 @@ struct ErrorInfo {
     bool isError;
     ErrorType type;
     String message;
-    String statusMessage;  // 添加状态信息
+    String statusMessage;
 };
 
 ErrorInfo currentError = {false, ERROR_NONE, "", ""};
@@ -153,15 +153,21 @@ void setup() {
     delay(100);
     stopMotors();
 
-    // init complete
-    Serial.println("System initialized");
-    lcd.print("System Ready!");
 
     // setup encoder interrupt
     pinMode(LEFT_ENCODER_PIN, INPUT_PULLUP);
     pinMode(RIGHT_ENCODER_PIN, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(LEFT_ENCODER_PIN), handleLeftEncoder, RISING);
     attachInterrupt(digitalPinToInterrupt(RIGHT_ENCODER_PIN), handleRightEncoder, RISING);
+
+    // turn to north at beginning
+    delay(2000); 
+    updateOrientation();
+    handleTurnCommand("0");
+
+        // init complete
+    Serial.println("System initialized");
+
 }
 
 void setupMotors() {
@@ -171,7 +177,7 @@ void setupMotors() {
     pinMode(LEFT_MOTOR_PWM_PIN, OUTPUT);
     pinMode(RIGHT_MOTOR_PWM_PIN, OUTPUT);
     
-    // 确保电机初始状态为停止，尝试修改方向引脚的默认值
+    // ensure motors stop
     stopMotors();
     
     leftMotorSpeed = 0;
@@ -262,7 +268,10 @@ int readCompass() {
         
         return heading;
     }
-    handleError(ERROR_COMPASS, "Compass read failed");
+    currentError.isError = true;
+    currentError.type = ERROR_COMPASS;
+    currentError.message = "Compass read failed";
+    currentError.statusMessage = "Compass Error";
     return -1;  // read failed
 }
 
@@ -278,7 +287,11 @@ int readRawCompass() {
         int raw = Wire.read();
         return map(raw, 0, 255, 0, 359);
     }
-    
+
+    currentError.isError = true;
+    currentError.type = ERROR_COMPASS;
+    currentError.message = "Compass read failed";
+    currentError.statusMessage = "Compass Error";
     return -1;
 }
 
@@ -408,72 +421,67 @@ void handleTurnCommand(String value) {
     int turnAngle = value.toInt();
     updateOrientation();
     int initialOrientation = currentOrientation;
-    int accumulatedAngle = 0;  // calculate turn angle
+    int accumulatedAngle = 0;
     int lastOrientation = currentOrientation;
     
     // find:North
     if (turnAngle == 0) {
-        // find north mode use shortest path
         int diff = -currentOrientation;
         if (diff < -180) diff += 360;
         if (diff > 180) diff -= 360;
         turnAngle = diff;
     }
 
-    while (abs(accumulatedAngle) < abs(turnAngle)) {
+    // 添加死区范围
+    const int ANGLE_DEADZONE = 2;  // daedzone
+    
+    while (abs(accumulatedAngle - turnAngle) > ANGLE_DEADZONE) {
         updateOrientation();
         
-        // calculate single turn angle change
         int angleChange = currentOrientation - lastOrientation;
         
-        // handle angle wrap
         if (angleChange > 180) angleChange -= 360;
         if (angleChange < -180) angleChange += 360;
         
-        // only add when angle change exceed threshold
-        if (abs(angleChange) > 1) {
+        // 降低角度变化阈值，提高精度
+        if (abs(angleChange) > 0.5) {
             if (turnAngle > 0) {
-                // right turn
                 if (angleChange > 0) {
                     accumulatedAngle += angleChange;
                 } else {
-                    // handle wrap from 359 to 0
                     accumulatedAngle += (angleChange + 360);
                 }
             } else {
-                // left turn
                 if (angleChange < 0) {
                     accumulatedAngle += angleChange;
                 } else {
-                    // handle wrap from 0 to 359
                     accumulatedAngle -= (360 - angleChange);
                 }
             }
             lastOrientation = currentOrientation;
         }
 
-        // 计算剩余需要转动的角度
-        // calculate remaining turn angle
         int remainingAngle = abs(turnAngle) - abs(accumulatedAngle);
         
-        // dynamic speed with remaining angle
-        // 根据剩余角度动态调整速度
+        // speed control
         int turnSpeed;
-        if (remainingAngle < 10) {
+        if (remainingAngle < 5) {
+            turnSpeed = MIN_TURN_SPEED - 40; 
+        } else if (remainingAngle < 15) {
             turnSpeed = MIN_TURN_SPEED - 30;
         } else if (remainingAngle < 30) {
             turnSpeed = MIN_TURN_SPEED - 20;
+        } else if (remainingAngle < 45) {
+            turnSpeed = MIN_TURN_SPEED - 10;
         } else {
             turnSpeed = MIN_TURN_SPEED;
         }
 
         // set motor direction
         if (turnAngle > 0) {
-            // right turn
             digitalWrite(LEFT_MOTOR_DIR_PIN, FORWARD);
             digitalWrite(RIGHT_MOTOR_DIR_PIN, BACKWARD);
         } else {
-            // left turn
             digitalWrite(LEFT_MOTOR_DIR_PIN, BACKWARD);
             digitalWrite(RIGHT_MOTOR_DIR_PIN, FORWARD);
         }
@@ -482,11 +490,21 @@ void handleTurnCommand(String value) {
         analogWrite(LEFT_MOTOR_PWM_PIN, turnSpeed);
         analogWrite(RIGHT_MOTOR_PWM_PIN, turnSpeed);
 
-        delay(50);
+        // dynamic delay, adjust according to remaining angle
+        if(remainingAngle < 10) {
+            delay(20);  // use shorter delay when close to target
+        } else {
+            delay(30);
+        }
     }
     
+    // stop motors
     stopMotors();
-    Serial.println("Turn completed");
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Turn completed");
+    delay(2000); 
+    updateLCD();
 }
 
 // update orientation
@@ -510,47 +528,25 @@ void updateLCD() {
     lcd.clear();
 
     //  status info
-    lcd.setCursor(0, 1);
+    lcd.setCursor(0, 0);
     lcd.print("Status: ");
     lcd.print(currentError.statusMessage);
-    
-    // direction info
-    displayDirection(currentOrientation);
-    
+
     // encoder info
-    lcd.setCursor(0, 3);
+    lcd.setCursor(0, 1);
     lcd.print("L:");
     lcd.print(leftEncoderPulses);
     lcd.print(" R:");
     lcd.print(rightEncoderPulses);
-}
-
-// error handling
-void handleError(ErrorType type, String message) {
-    currentError.isError = true;
-    currentError.type = type;
-    currentError.message = message;
     
-    // handle error
-    switch(type) {
-        case ERROR_COMPASS:
-            stopMotors();
-            currentError.statusMessage = "Compass Error";
-            break;
-            
-        case ERROR_MOTOR:
-            stopMotors();
-            currentError.statusMessage = "Motor Error";
-            break;
-            
-        case ERROR_JOYSTICK:
-            stopMotors();
-            currentError.statusMessage = "Joystick Error";
-            break;
-            
-        case ERROR_COMMUNICATION:
-            currentError.statusMessage = "Comm Error";
-            break;
+    // direction info
+    displayDirection(currentOrientation);
+    
+    // print error info
+    lcd.setCursor(0, 3);
+    if (currentError.isError) {
+        lcd.print("ERR:");
+        lcd.print(currentError.message);
     }
 }
 
@@ -612,9 +608,9 @@ void resetEncoders() {
 
 void handleError() {
     if (currentError.isError) {
-        // display error info
-        lcd.clear();
-        lcd.print("Error: " + currentError.message);
+
+        lcd.setCursor(0, 3);
+        lcd.print("ERR: " + currentError.message);
         
         // handle error
         switch(currentError.type) {
@@ -633,10 +629,6 @@ void handleError() {
                 break;
         }
         
-        // clear error status
-        currentError.isError = false;
-        currentError.message = "";
-        updateLCD();
     }
 }
 
