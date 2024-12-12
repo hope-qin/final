@@ -508,7 +508,6 @@ void moveMotors(int leftSpeed, int rightSpeed) {
 // update LCD
 void updateLCD() {
     lcd.clear();
-    
 
     //  status info
     lcd.setCursor(0, 1);
